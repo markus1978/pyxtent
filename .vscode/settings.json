@@ -28,37 +28,6 @@
         "version": "0.2.0",
         "configurations": [
             {
-                "name": "gui",
-                "type": "chrome",
-                "request": "launch",
-                "url": "http://localhost:3000",
-                "webRoot": "${workspaceFolder}/gui"
-            },
-            {
-                "name": "app",
-                "type": "python",
-                "request": "launch",
-                "justMyCode": false,
-                "program": "${workspaceFolder}/.pyenv/bin/nomad",
-                "args": [
-                    "admin",
-                    "run",
-                    "api"
-                ]
-            },
-            {
-                "name": "hub",
-                "type": "python",
-                "request": "launch",
-                "justMyCode": false,
-                "program": "${workspaceFolder}/.pyenv/bin/nomad",
-                "args": [
-                    "admin",
-                    "run",
-                    "hub"
-                ]
-            },
-            {
                 "name": "tests",
                 "type": "python",
                 "request": "launch",
@@ -68,19 +37,6 @@
                 "args": [
                     "-sv",
                     "tests"
-                ]
-            },
-            {
-                "name": "nomad parse",
-                "type": "python",
-                "request": "launch",
-                "cwd": "${workspaceFolder}",
-                "program": "${workspaceFolder}/.env/bin/nomad",
-                "justMyCode": false,
-                "args": [
-                    "parse",
-                    "--show-archive",
-                    "tests/data/parsers/vasp/vasp.xml"
                 ]
             },
             {
