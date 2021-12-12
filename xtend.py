@@ -1,92 +1,117 @@
 from typing import Generator, Tuple, Union, List
 import re
 
-tokens = {
-    'keyword': r'IF|ELSE|ELIF|FOR|IN|END|SEPERATOR',
-    'open': r'(?<!{){(?!{)',
-    'close': r'(?<!})}(?!})',
-    'nl': r'\n',
-    'indent': r'    |\t',
-    'other': r'.'
-}
 
-token_pattern = re.compile('|'.join([
-    f'(?P<{name}>{expr})' for name, expr in tokens.items()
-]))
+class Scanner:
+    tokens = {
+        'keyword': r'IF|ELSE|ELIF|FOR|IN|END|SEPERATOR',
+        'open': r'(?<!{){(?!{)',
+        'close': r'(?<!})}(?!})',
+        'nl': r'\n',
+        'indent': r'    |\t',
+        'other': r'.'
+    }
 
+    token_pattern = re.compile('|'.join([
+        f'(?P<{name}>{expr})' for name, expr in tokens.items()
+    ]))
 
-def scan(input: str) -> Generator[Tuple[str, str], None, None]:
-    state = 'string'
-    current_string = []
+    def __init__(self, input):
+        self.input = Scanner.token_pattern.finditer(input)
+        self._lookahead = None
+        self.state = 'string'
+        self.position = 0
 
-    for match in token_pattern.finditer(input):
-        token, value = match.lastgroup, match.group()
-        if state == 'string':
+    def _next(self) -> Tuple[str, str]:
+        if self._lookahead:
+            next_item = self._lookahead
+            self._lookahead = None
+            return next_item
+        match = next(self.input, None)
+        if match:
+            self.position = match.span()
+            return match.lastgroup, match.group()
+        return None, None
+
+    def _peek(self) -> Tuple[str, str]:
+        if not self._lookahead:
+            self._lookahead = self._next()
+        return self._lookahead
+
+    def next(self) -> Tuple[str, str]:
+        token, value = self._next()
+        if self.state == 'string':
             if token in ['other', 'keyword']:
-                current_string.append(value)
-                continue
-
-            if len(current_string) > 0:
-                yield ('string', ''.join(current_string))
-                current_string = []
+                values = [value]
+                while self._peek()[0] in ['other', 'keyword']:
+                    _, value = self._next()
+                    values.append(value)
+                return 'string', ''.join(values)
 
             if token in ['nl', 'indent']:
-                yield (token, value)
-            elif token == 'open':
-                state = 'xtend'
-            else:
-                raise NotImplementedError()
+                return (token, value)
 
-        elif state == 'xtend':
+            if token == 'open':
+                self.state = 'xtend'
+                return self.next()
+
+        if self.state == 'xtend':
             if token in ['other', 'nl', 'indent']:
-                current_string.append(value)
-                continue
+                values = [value]
+                while self._peek()[0] in ['other', 'nl', 'indent']:
+                    _, value = self._next()
+                    values.append(value)
+                return 'code', ''.join(values)
 
-            if len(current_string) > 0:
-                yield 'code', ''.join(current_string)
-                current_string = []
+            if token == 'keyword':
+                return token, value
 
             if token == 'close':
-                state = 'string'
-            elif token == 'keyword':
-                yield 'keyword', value
-            else:
-                raise NotImplementedError()
+                self.state = 'string'
+                return self.next()
 
-    if len(current_string) > 0:
-        if state == 'string':
-            yield ('string', ''.join(current_string))
-        else:
-            yield ('code', ''.join(current_string))
+        if token is None:
+            return None, None
+
+        raise NotImplementedError()
+
+    def scan(self):
+        results = []
+        while True:
+            token, value = self.next()
+            if token is None:
+                break
+            results.append((token, value))
+        return results
 
 
 class Parser():
     def __init__(self, input):
-        self.input = scan(input)
-        self.lookahead = None
+        self.scanner = Scanner(input)
+        self._lookahead = None
 
     def fail(self, expected=Union[str, List[str]]):
         raise Exception('cannot parse')
 
-    def next(self) -> Tuple[str, str]:
-        if self.lookahead:
-            next_item = self.lookahead
-            self.lookahead = None
+    def _next(self) -> Tuple[str, str]:
+        if self._lookahead:
+            next_item = self._lookahead
+            self._lookahead = None
             return next_item
-        return next(self.input, (None, None))
+        return self.scanner.next()
 
-    def peek(self) -> Tuple[str, str]:
-        if not self.lookahead:
-            self.lookahead = self.next()
-        return self.lookahead
+    def _peek(self) -> Tuple[str, str]:
+        if not self._lookahead:
+            self._lookahead = self._next()
+        return self._lookahead
 
     def parse_keyword(self, keyword: str):
-        token, value = self.next()
+        token, value = self._next()
         if token != 'keyword' and value != keyword:
             self.fail(expected=keyword)
 
     def parse_code(self):
-        token, value = self.next()
+        token, value = self._next()
         if token == 'code':
             if value.strip() == '':
                 self.fail(expected='code')
@@ -96,9 +121,9 @@ class Parser():
     def parse_string(self):
         string_value = []
         while True:
-            token, value = self.peek()
+            token, value = self._peek()
             if token in ['string', 'indent', 'nl']:
-                self.next()
+                self._next()
                 string_value.append(value)
 
             else:
@@ -110,12 +135,12 @@ class Parser():
         return 'string', ''.join(string_value)
 
     def parse_xtend(self):
-        while self.peek()[0]:
+        while self._peek()[0]:
             yield self.parse_stmt()
 
     def parse_stmt(self):
         # stmt -> string | if | for | expr
-        token, value = self.peek()
+        token, value = self._peek()
         if token == 'keyword':
             if value == 'IF':
                 return self.parse_if()
@@ -143,14 +168,14 @@ class Parser():
         results.append((self.parse_code(), self.parse_stmt()))
 
         while True:
-            token, value = self.peek()
+            token, value = self._peek()
             if token == 'keyword':
                 if value == 'ELIF':
-                    self.next()
+                    self._next()
                     results.append((self.parse_code(), self.parse_stmt()))
                     continue
                 elif value == 'ELSE':
-                    self.next()
+                    self._next()
                     results.append((self.parse_stmt()))
                     break
                 elif value == 'END':
