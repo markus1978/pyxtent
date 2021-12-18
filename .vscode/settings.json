@@ -9,9 +9,6 @@
         "editor.tabSize": 2
     },
     "files.trimTrailingWhitespace": true,
-    "python.linting.pylintArgs": [
-        "--load-plugins=pylint_mongoengine",
-    ],
     "python.linting.pycodestylePath": "pycodestyle",
     "python.linting.pycodestyleEnabled": true,
     "python.linting.pycodestyleArgs": [

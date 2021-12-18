@@ -1,5 +1,6 @@
 from typing import List
 import pytest
+import inspect
 
 from xtend import (
     strip, xtend, scan, parse, XtendParseException, Node, StrNode, IfNode, ExprNode,
@@ -78,11 +79,9 @@ def test_parse_exception():
 
 
 def test_python():
-    import inspect
-
     global global_var
     global_var = 'global'
-    local_var = 'local'
+    local_var = 'local'  # pylint: disable=unused-variable
     assert eval('local_var') == 'local'
 
     def called():

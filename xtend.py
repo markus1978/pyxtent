@@ -304,11 +304,13 @@ class Parser():
                     self._next()
                     if_branches.append((self.parse_code(), self.parse_stmts()))
                     continue
-                elif value == 'ELSE':
+
+                if value == 'ELSE':
                     self._next()
                     else_branch = self.parse_stmts()
                     break
-                elif value == 'END':
+
+                if value == 'END':
                     break
 
                 raise NotImplementedError()  # pragma: no cover

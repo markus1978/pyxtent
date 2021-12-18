@@ -1,0 +1,33 @@
+name: python
+
+on: [push]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 3.7
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.7
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: pycodestyle
+      run: |
+        python -m pycodestyle --ignore=E501,E701,E731 xtend.py tests.py
+    - name: pylint
+      run: |
+        python -m pylint xtend.py tests.py
+    - name: mypy
+      run: |
+        python -m mypy --ignore-missing-imports --follow-imports=silent --no-strict-optional xtend.py tests.py
+    - name: Test with pytest
+      run: |
+        pytest --cov=./ --cov-report=xml -sv tests.py
+    - name: "Upload coverage to Codecov"
+      uses: codecov/codecov-action@v2
+      with:
+        fail_ci_if_error: true
