@@ -2,7 +2,7 @@ from typing import List
 import pytest
 
 from xtend import (
-    Scanner, parse, XtendParseException, StmtNode, IfNode, ExprNode, ForNode)
+    xtend, scan, parse, XtendParseException, Node, StrNode, IfNode, ExprNode, ForNode)
 
 
 @pytest.mark.parametrize('input, output', [
@@ -22,18 +22,18 @@ from xtend import (
 def test_scanner(input: str, output: str):
     if output is None:
         with pytest.raises(XtendParseException):
-            Scanner(input).scan()
+            scan(input)
         return
 
-    result_output = [token for token, _ in Scanner(input).scan()]
+    result_output = [token for token, _ in scan(input)]
     expected_output = [token.strip() for token in output.split(',')]
     assert result_output == expected_output
 
 
 @pytest.mark.parametrize('input, output', [
-    pytest.param('class', [str], id='string'),
-    pytest.param('class {name}:', [str, ExprNode, str], id='expr'),
-    pytest.param('class name{IF base}(base){END}:', [str, IfNode, str], id='if'),
+    pytest.param('class', [StrNode], id='string'),
+    pytest.param('class {name}:', [StrNode, ExprNode, StrNode], id='expr'),
+    pytest.param('class name{IF base}(base){END}:', [StrNode, IfNode, StrNode], id='if'),
     pytest.param('{IF c}s{ELIF c}s{END}', [IfNode], id='if-elif'),
     pytest.param('{IF c}s{ELIF}s{END}', None, id='elif-no-code'),
     pytest.param('{IF c}s{ELSE}s{END}', [IfNode], id='if-else'),
@@ -42,8 +42,9 @@ def test_scanner(input: str, output: str):
     pytest.param('{IF c}{END}', None, id='if-no-stmt'),
     pytest.param('{IF }s{END}', None, id='if-no-code'),
     pytest.param('{IF c}', None, id='if-no-follow'),
+    pytest.param('{IF c}{c}s{END}', [IfNode], id='if-stmts'),
     pytest.param('{END}', None, id='end-no-if'),
-    pytest.param('s{END}', None, id='end-no-if'),
+    pytest.param('s{END}', None, id='str-end-no-if'),
     pytest.param('s{ELIF}', None, id='elif-no-if'),
     pytest.param('{IF c}s{ELIF c}{END}', None, id='elif-no-stmt'),
     pytest.param('{IF c}s{ELSE}{END}', None, id='else-no-stmt'),
@@ -53,9 +54,9 @@ def test_scanner(input: str, output: str):
         {IF c}
             s
         {END}
-    ''', [str, IfNode, str], id='multiline')
+    ''', [StrNode, IfNode, StrNode], id='multiline')
 ])
-def test_parser(input: str, output: List[StmtNode]):
+def test_parser(input: str, output: List[Node]):
     if output is None:
         with pytest.raises(XtendParseException):
             parse(input)
@@ -73,3 +74,37 @@ def test_parse_exception():
         return
 
     assert False, 'expected a parse exception'
+
+
+def test_python():
+    import inspect
+
+    global global_var
+    global_var = 'global'
+    local_var = 'local'
+    assert eval('local_var') == 'local'
+
+    def called():
+        locals = inspect.currentframe().f_back.f_locals
+        globals = inspect.currentframe().f_back.f_globals
+        assert eval('global_var + " " + local_var', globals, locals) == 'global local'
+
+    called()
+
+
+@pytest.mark.parametrize('input, context, output', [
+    pytest.param('s', {}, 's', id='string'),
+    pytest.param('{v}', {'v': 'value'}, 'value', id='expr'),
+    pytest.param('{IF c}t{ELSE}f{END}', {'c': True}, 't', id='if'),
+    pytest.param('{IF c}t{ELSE}f{END}', {'c': False}, 'f', id='if-else'),
+    pytest.param('{IF c}t{ELIF not c}f{END}', {'c': False}, 'f', id='if-elif'),
+    pytest.param('{IF c}t{END}', {'c': False}, '', id='if-none'),
+    pytest.param('{FOR c IN l}{c}{END}', {'l': ['v1', 'v2']}, 'v1v2', id='for-stmt'),
+    pytest.param('{FOR c IN l}{c},{END}', {'l': ['v1', 'v2']}, 'v1,v2,', id='for-stmts'),
+    pytest.param('{FOR c IN l SEPARATOR ","}{c}{END}', {'l': ['v1', 'v2']}, 'v1,v2', id='for-separator'),
+    pytest.param('{FOR c IN l}:{IF c}t{ELSE}f{END}:{END}', {'l': [True, False]}, ':t::f:', id='nested-for-if'),
+    pytest.param('{IF c1}t,{IF c2}t{ELSE}f{END}{ELSE}f{END}', {'c1': True, 'c2': False}, 't,f', id='nested-if-if'),
+])
+def test_xtend(input: str, context: dict, output: str):
+    locals().update(context)
+    assert output == xtend(input)

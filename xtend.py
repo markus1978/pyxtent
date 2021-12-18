@@ -1,11 +1,12 @@
 from typing import Tuple, Union, List, Optional, NoReturn
 from dataclasses import dataclass
 import re
+import inspect
 
 
 class Scanner:
     tokens = {
-        'keyword': r'IF|ELSE|ELIF|FOR|IN|END|SEPERATOR',
+        'keyword': r'IF|ELSE|ELIF|FOR|IN|END|SEPARATOR',
         'open': r'(?<!{){(?!{)',
         'close': r'(?<!})}(?!})',
         'newline': r'\n',
@@ -85,17 +86,19 @@ class Scanner:
 
     def end(self):
         if self.state == self.state_xtend:
-            raise XtendParseException(self, '{')
+            raise XtendParseException(self, '}')
 
-    def scan(self):
-        results = []
-        while True:
-            token, value = self.next()
-            if token is None:
-                break
-            results.append((token, value))
-        self.end()
-        return results
+
+def scan(input):
+    scanner = Scanner(input)
+    results = []
+    while True:
+        token, value = scanner.next()
+        if token is None:
+            break
+        results.append((token, value))
+    scanner.end()
+    return results
 
 
 class XtendParseException(Exception):
@@ -124,31 +127,67 @@ class XtendParseException(Exception):
         return result
 
 
-StmtNode = Union['IfNode', 'ForNode', 'ExprNode', str]
+Node = Union['IfNode', 'ForNode', 'ExprNode', 'StmtsNode', 'StrNode']
 
 
 @dataclass(frozen=True)
-class XtendNode():
-    stmts: List[StmtNode]
+class StmtsNode():
+    stmts: List[Node]
+
+    def run(self, *args) -> str:
+        return ''.join([stmt.run(*args) for stmt in self.stmts])
 
 
 @dataclass(frozen=True)
 class IfNode():
-    if_branches: List[Tuple[str, StmtNode]]
-    else_branch: Optional[StmtNode] = None
+    if_branches: List[Tuple[str, Node]]
+    else_branch: Optional[Node] = None
+
+    def run(self, *args) -> str:
+        for condition, stmt in self.if_branches:
+            if eval(condition, *args):
+                return stmt.run(*args)
+        if self.else_branch:
+            return self.else_branch.run(*args)
+
+        return ''
 
 
 @dataclass(frozen=True)
 class ForNode():
     var: str
     list_expr: str
-    body: StmtNode
-    seperator_expr: Optional[str] = None
+    body: Node
+    separator_expr: Optional[str] = None
+
+    def run(self, globals, locals) -> str:
+        new_locals = dict(**locals)
+        results = []
+        for item in eval(self.list_expr, globals, locals):
+            new_locals[self.var] = item
+            results.append(self.body.run(globals, new_locals))
+
+        if self.separator_expr:
+            separator = eval(self.separator_expr, globals, locals)
+        else:
+            separator = ''
+        return separator.join(results)
 
 
 @dataclass(frozen=True)
 class ExprNode():
     expr: str
+
+    def run(self, *args) -> str:
+        return eval(self.expr, *args)
+
+
+@dataclass(frozen=True)
+class StrNode():
+    value: str
+
+    def run(self, *args) -> str:
+        return self.value
 
 
 class Parser():
@@ -173,13 +212,13 @@ class Parser():
 
     def parse_keyword(self, keyword: str) -> None:
         token, value = self._next()
-        if token != 'keyword' and value != keyword:
+        if token != 'keyword' or value != keyword:
             self.fail(expected=keyword, got=token)
 
     def parse_code(self) -> str:
         token, value = self._next()
         if token == 'code':
-            return value
+            return value.strip()
         self.fail(expected='code', got=token)
 
     def parse_string(self) -> str:
@@ -193,14 +232,30 @@ class Parser():
             else:
                 return ''.join(string_value)
 
-    def parse_xtend(self) -> XtendNode:
-        stmts = []
-        while self._peek()[0]:
-            stmts.append(self.parse_stmt())
+    def parse_xtend(self) -> StmtsNode:
+        stmts = self.parse_stmts()
+        token, value = self._next()
+        if token is not None:
+            self.fail('end', value if token == 'keyword' else token)
         self.scanner.end()
-        return XtendNode(stmts=stmts)
+        return stmts
 
-    def parse_stmt(self) -> StmtNode:
+    def parse_stmts(self, allow_empty=False) -> StmtsNode:
+        stmts: List[Node] = []
+        while True:
+            token, value = self._peek()
+            if token == 'keyword' and value in ['ELIF', 'ELSE', 'END']:
+                break
+            if token is None:
+                break
+            stmts.append(self.parse_stmt())
+
+        if not allow_empty:
+            if len(stmts) == 0:
+                self.fail(expected=['string', 'code'], got=token)
+        return StmtsNode(stmts=stmts)
+
+    def parse_stmt(self) -> Node:
         # stmt -> string | if | for | expr
         token, value = self._peek()
         if token == 'keyword':
@@ -210,36 +265,34 @@ class Parser():
             if value == 'FOR':
                 return self.parse_for()
 
-            self.fail(expected=['IF', 'FOR'], got=token)
-
         if token in ['string', 'indent', 'newline']:
-            return self.parse_string()
+            return StrNode(value=self.parse_string())
 
         if token == 'code':
             return self.parse_expr()
 
-        self.fail(expected=['IF', 'FOR', 'string', 'code'], got=token)
+        raise NotImplementedError()  # pragma: no cover
 
     def parse_expr(self) -> ExprNode:
         return ExprNode(expr=self.parse_code())
 
     def parse_if(self) -> IfNode:
         # if -> IF CODE stmt (ELIF CODE stmt)* (ELSE stmt)? END
-        if_branches: List[Tuple[str, StmtNode]] = []
+        if_branches: List[Tuple[str, Node]] = []
         self.parse_keyword('IF')
-        if_branches.append((self.parse_code(), self.parse_stmt()))
-        else_branch: StmtNode = None
+        if_branches.append((self.parse_code(), self.parse_stmts()))
+        else_branch: Node = None
 
         while True:
             token, value = self._peek()
             if token == 'keyword':
                 if value == 'ELIF':
                     self._next()
-                    if_branches.append((self.parse_code(), self.parse_stmt()))
+                    if_branches.append((self.parse_code(), self.parse_stmts()))
                     continue
                 elif value == 'ELSE':
                     self._next()
-                    else_branch = self.parse_stmt()
+                    else_branch = self.parse_stmts()
                     break
                 elif value == 'END':
                     break
@@ -251,16 +304,31 @@ class Parser():
         return IfNode(if_branches=if_branches, else_branch=else_branch)
 
     def parse_for(self) -> ForNode:
-        # for -> FOR code IN code (SEPERATOR code)? stmt END
+        # for -> FOR code IN code (SEPARATOR code)? stmt END
         self.parse_keyword('FOR')
         var = self.parse_code()
         self.parse_keyword('IN')
         list_expr = self.parse_code()
-        body = self.parse_stmt()
+        token, value = self._peek()
+        if token == 'keyword' and value == 'SEPARATOR':
+            self.parse_keyword('SEPARATOR')
+            separator_expr = self.parse_code()
+        else:
+            separator_expr = None
+        body = self.parse_stmts()
         self.parse_keyword('END')
 
-        return ForNode(var=var, list_expr=list_expr, body=body)
+        return ForNode(
+            var=var, list_expr=list_expr, body=body, separator_expr=separator_expr)
 
 
-def parse(input: str) -> XtendNode:
+def parse(input: str) -> StmtsNode:
     return Parser(input).parse_xtend()
+
+
+def xtend(input: str, globals: dict = None, locals: dict = None) -> str:
+    if globals is None:
+        globals = inspect.currentframe().f_back.f_globals
+    if locals is None:
+        locals = inspect.currentframe().f_back.f_locals
+    return parse(input).run(globals, locals)
