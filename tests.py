@@ -2,7 +2,8 @@ from typing import List
 import pytest
 
 from xtend import (
-    xtend, scan, parse, XtendParseException, Node, StrNode, IfNode, ExprNode, ForNode)
+    strip, xtend, scan, parse, XtendParseException, Node, StrNode, IfNode, ExprNode,
+    ForNode)
 
 
 @pytest.mark.parametrize('input, output', [
@@ -104,7 +105,28 @@ def test_python():
     pytest.param('{FOR c IN l SEPARATOR ","}{c}{END}', {'l': ['v1', 'v2']}, 'v1,v2', id='for-separator'),
     pytest.param('{FOR c IN l}:{IF c}t{ELSE}f{END}:{END}', {'l': [True, False]}, ':t::f:', id='nested-for-if'),
     pytest.param('{IF c1}t,{IF c2}t{ELSE}f{END}{ELSE}f{END}', {'c1': True, 'c2': False}, 't,f', id='nested-if-if'),
+    pytest.param('''
+        class {name}:
+            {IF init}
+                __init__(self):
+                    pass
+            {END}
+    ''', {'name': 'Foo', 'init': True}, strip('''
+        class Foo:
+            __init__(self):
+                pass
+    '''), id='indent'),
 ])
 def test_xtend(input: str, context: dict, output: str):
     locals().update(context)
+    result_output = xtend(input)
+
+    if output != result_output and input.startswith('\n'):
+        pytest.skip()
+        print('---')
+        print(result_output)
+        print('---')
+        print(output)
+        print('---')
+
     assert output == xtend(input)

@@ -4,6 +4,10 @@ import re
 import inspect
 
 
+def strip(str) -> str:
+    return inspect.cleandoc(str)
+
+
 class Scanner:
     tokens = {
         'keyword': r'IF|ELSE|ELIF|FOR|IN|END|SEPARATOR',
@@ -127,11 +131,20 @@ class XtendParseException(Exception):
         return result
 
 
-Node = Union['IfNode', 'ForNode', 'ExprNode', 'StmtsNode', 'StrNode']
+class Context():
+    remove: str = None
 
 
 @dataclass(frozen=True)
-class StmtsNode():
+class Node:
+    context: Context
+
+    def run(self, globals, locals) -> str:
+        raise NotImplementedError()  # pragma: no cover
+
+
+@dataclass(frozen=True)
+class StmtsNode(Node):
     stmts: List[Node]
 
     def run(self, *args) -> str:
@@ -139,7 +152,7 @@ class StmtsNode():
 
 
 @dataclass(frozen=True)
-class IfNode():
+class IfNode(Node):
     if_branches: List[Tuple[str, Node]]
     else_branch: Optional[Node] = None
 
@@ -154,7 +167,7 @@ class IfNode():
 
 
 @dataclass(frozen=True)
-class ForNode():
+class ForNode(Node):
     var: str
     list_expr: str
     body: Node
@@ -175,7 +188,7 @@ class ForNode():
 
 
 @dataclass(frozen=True)
-class ExprNode():
+class ExprNode(Node):
     expr: str
 
     def run(self, *args) -> str:
@@ -183,17 +196,18 @@ class ExprNode():
 
 
 @dataclass(frozen=True)
-class StrNode():
+class StrNode(Node):
     value: str
 
     def run(self, *args) -> str:
-        return self.value
+        return self.value.replace(' ', '.').replace('\n', 'R\n')
 
 
 class Parser():
-    def __init__(self, input):
+    def __init__(self, input: str):
         self.scanner = Scanner(input)
-        self._lookahead = None
+        self._lookahead: Tuple[str, str] = None
+        self.context = Context()
 
     def fail(self, expected: Union[str, List[str]], got: str) -> NoReturn:
         raise XtendParseException(self.scanner, expected, got)
@@ -253,7 +267,7 @@ class Parser():
         if not allow_empty:
             if len(stmts) == 0:
                 self.fail(expected=['string', 'code'], got=token)
-        return StmtsNode(stmts=stmts)
+        return StmtsNode(context=self.context, stmts=stmts)
 
     def parse_stmt(self) -> Node:
         # stmt -> string | if | for | expr
@@ -266,7 +280,7 @@ class Parser():
                 return self.parse_for()
 
         if token in ['string', 'indent', 'newline']:
-            return StrNode(value=self.parse_string())
+            return StrNode(context=self.context, value=self.parse_string())
 
         if token == 'code':
             return self.parse_expr()
@@ -274,7 +288,7 @@ class Parser():
         raise NotImplementedError()  # pragma: no cover
 
     def parse_expr(self) -> ExprNode:
-        return ExprNode(expr=self.parse_code())
+        return ExprNode(context=self.context, expr=self.parse_code())
 
     def parse_if(self) -> IfNode:
         # if -> IF CODE stmt (ELIF CODE stmt)* (ELSE stmt)? END
@@ -301,7 +315,8 @@ class Parser():
 
         self.parse_keyword('END')
 
-        return IfNode(if_branches=if_branches, else_branch=else_branch)
+        return IfNode(
+            context=self.context, if_branches=if_branches, else_branch=else_branch)
 
     def parse_for(self) -> ForNode:
         # for -> FOR code IN code (SEPARATOR code)? stmt END
@@ -319,7 +334,8 @@ class Parser():
         self.parse_keyword('END')
 
         return ForNode(
-            var=var, list_expr=list_expr, body=body, separator_expr=separator_expr)
+            context=self.context, var=var, list_expr=list_expr, body=body,
+            separator_expr=separator_expr)
 
 
 def parse(input: str) -> StmtsNode:
