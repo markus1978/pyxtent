@@ -1,4 +1,5 @@
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, Optional, NoReturn
+from dataclasses import dataclass
 import re
 
 
@@ -123,12 +124,39 @@ class XtendParseException(Exception):
         return result
 
 
+StmtNode = Union['IfNode', 'ForNode', 'ExprNode', str]
+
+
+@dataclass(frozen=True)
+class XtendNode():
+    stmts: List[StmtNode]
+
+
+@dataclass(frozen=True)
+class IfNode():
+    if_branches: List[Tuple[str, StmtNode]]
+    else_branch: Optional[StmtNode] = None
+
+
+@dataclass(frozen=True)
+class ForNode():
+    var: str
+    list_expr: str
+    body: StmtNode
+    seperator_expr: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ExprNode():
+    expr: str
+
+
 class Parser():
     def __init__(self, input):
         self.scanner = Scanner(input)
         self._lookahead = None
 
-    def fail(self, expected: Union[str, List[str]], got: str):
+    def fail(self, expected: Union[str, List[str]], got: str) -> NoReturn:
         raise XtendParseException(self.scanner, expected, got)
 
     def _next(self) -> Tuple[str, str]:
@@ -143,18 +171,18 @@ class Parser():
             self._lookahead = self._next()
         return self._lookahead
 
-    def parse_keyword(self, keyword: str):
+    def parse_keyword(self, keyword: str) -> None:
         token, value = self._next()
         if token != 'keyword' and value != keyword:
             self.fail(expected=keyword, got=token)
 
-    def parse_code(self):
+    def parse_code(self) -> str:
         token, value = self._next()
         if token == 'code':
-            return 'code', value
+            return value
         self.fail(expected='code', got=token)
 
-    def parse_string(self):
+    def parse_string(self) -> str:
         string_value = []
         while True:
             token, value = self._peek()
@@ -163,14 +191,16 @@ class Parser():
                 string_value.append(value)
 
             else:
-                return 'string', ''.join(string_value)
+                return ''.join(string_value)
 
-    def parse_xtend(self):
+    def parse_xtend(self) -> XtendNode:
+        stmts = []
         while self._peek()[0]:
-            yield self.parse_stmt()
+            stmts.append(self.parse_stmt())
         self.scanner.end()
+        return XtendNode(stmts=stmts)
 
-    def parse_stmt(self):
+    def parse_stmt(self) -> StmtNode:
         # stmt -> string | if | for | expr
         token, value = self._peek()
         if token == 'keyword':
@@ -190,25 +220,26 @@ class Parser():
 
         self.fail(expected=['IF', 'FOR', 'string', 'code'], got=token)
 
-    def parse_expr(self):
-        return 'expr', self.parse_code()
+    def parse_expr(self) -> ExprNode:
+        return ExprNode(expr=self.parse_code())
 
-    def parse_if(self):
+    def parse_if(self) -> IfNode:
         # if -> IF CODE stmt (ELIF CODE stmt)* (ELSE stmt)? END
-        results = []
+        if_branches: List[Tuple[str, StmtNode]] = []
         self.parse_keyword('IF')
-        results.append((self.parse_code(), self.parse_stmt()))
+        if_branches.append((self.parse_code(), self.parse_stmt()))
+        else_branch: StmtNode = None
 
         while True:
             token, value = self._peek()
             if token == 'keyword':
                 if value == 'ELIF':
                     self._next()
-                    results.append((self.parse_code(), self.parse_stmt()))
+                    if_branches.append((self.parse_code(), self.parse_stmt()))
                     continue
                 elif value == 'ELSE':
                     self._next()
-                    results.append((self.parse_stmt()))
+                    else_branch = self.parse_stmt()
                     break
                 elif value == 'END':
                     break
@@ -217,19 +248,19 @@ class Parser():
 
         self.parse_keyword('END')
 
-        return 'if', results
+        return IfNode(if_branches=if_branches, else_branch=else_branch)
 
-    def parse_for(self):
+    def parse_for(self) -> ForNode:
         # for -> FOR code IN code (SEPERATOR code)? stmt END
         self.parse_keyword('FOR')
-        item_code = self.parse_code()
+        var = self.parse_code()
         self.parse_keyword('IN')
-        list_code = self.parse_code()
-        stmt = self.parse_stmt()
+        list_expr = self.parse_code()
+        body = self.parse_stmt()
         self.parse_keyword('END')
 
-        return 'for', (item_code, list_code, stmt)
+        return ForNode(var=var, list_expr=list_expr, body=body)
 
 
-def parse(input: str):
+def parse(input: str) -> XtendNode:
     return Parser(input).parse_xtend()
