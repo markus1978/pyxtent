@@ -1,7 +1,7 @@
 from _pytest.python_api import raises
 import pytest
 
-from xtend import Scanner, parse
+from xtend import Scanner, parse, XtendParseException
 
 
 @pytest.mark.parametrize('input, output', [
@@ -12,7 +12,7 @@ from xtend import Scanner, parse
         'string, keyword, code, string, keyword, string', id='if'),
     pytest.param(
         '    {FOR item IN list}\n',
-        'indent, keyword, code, keyword, code, nl',
+        'indent, keyword, code, keyword, code, newline',
         id='with-white-space'
     ),
     pytest.param('1{{2}}3', 'string', id='escape'),
@@ -20,7 +20,7 @@ from xtend import Scanner, parse
 ])
 def test_scanner(input: str, output: str):
     if output is None:
-        with pytest.raises(Exception):
+        with pytest.raises(XtendParseException):
             Scanner(input).scan()
         return
 
@@ -34,6 +34,7 @@ def test_scanner(input: str, output: str):
     pytest.param('class {name}:', 'string, expr, string', id='expr'),
     pytest.param('class name{IF base}(base){END}:', 'string, if, string', id='if'),
     pytest.param('{IF c}s{ELIF c}s{END}', 'if', id='if-elif'),
+    pytest.param('{IF c}s{ELIF}s{END}', None, id='elif-no-code'),
     pytest.param('{IF c}s{ELSE}s{END}', 'if', id='if-else'),
     pytest.param('{IF c}s{ELSE}s{ELSE}s{END}', None, id='if-double-else'),
     pytest.param('{IF c}s{ELSE}s', None, id='if-no-end'),
@@ -46,14 +47,29 @@ def test_scanner(input: str, output: str):
     pytest.param('{IF c}s{ELIF c}{END}', None, id='elif-no-stmt'),
     pytest.param('{IF c}s{ELSE}{END}', None, id='else-no-stmt'),
     pytest.param('{FOR item IN list}{item}{END}', 'for', id='for'),
-    pytest.param('something { inbalanced', None, id='inbalanced-tmpl')
+    pytest.param('something { inbalanced', None, id='inbalanced-tmpl'),
+    pytest.param('''
+        {IF c}
+            s
+        {END}
+    ''', 'string, if, string', id='multiline')
 ])
 def test_parser(input: str, output: str):
     if output is None:
-        with pytest.raises(Exception):
+        with pytest.raises(XtendParseException):
             list(parse(input))
         return
 
     result_output = [token for token, _ in parse(input)]
     expected_output = [token.strip() for token in output.split(',')]
     assert result_output == expected_output
+
+
+def test_parse_exception():
+    try:
+        list(parse('\n{IF c}\ns{ELIF}\n{END}'))
+    except XtendParseException as e:
+        assert e.readable_error_position() == '\n{IF c}\ns{ELIF}\n       ^\n{END}\n'
+        return
+
+    assert False, 'expected a parse exception'

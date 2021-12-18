@@ -1,4 +1,4 @@
-from typing import Generator, Tuple, Union, List
+from typing import Tuple, Union, List
 import re
 
 
@@ -7,7 +7,7 @@ class Scanner:
         'keyword': r'IF|ELSE|ELIF|FOR|IN|END|SEPERATOR',
         'open': r'(?<!{){(?!{)',
         'close': r'(?<!})}(?!})',
-        'nl': r'\n',
+        'newline': r'\n',
         'indent': r'    |\t',
         'other': r'.'
     }
@@ -20,17 +20,18 @@ class Scanner:
     state_xtend = 'xtend'
 
     def __init__(self, input):
-        self.input = self.token_pattern.finditer(input)
+        self.input = input
+        self.stream = self.token_pattern.finditer(input)
         self._lookahead = None
         self.state = 'string'
-        self.position = 0
+        self.position = 0, 0
 
     def _next(self) -> Tuple[str, str]:
         if self._lookahead:
             next_item = self._lookahead
             self._lookahead = None
             return next_item
-        match = next(self.input, None)
+        match = next(self.stream, None)
         if match:
             self.position = match.span()
             return match.lastgroup, match.group()
@@ -51,7 +52,7 @@ class Scanner:
                     values.append(value)
                 return 'string', ''.join(values)
 
-            if token in ['nl', 'indent']:
+            if token in ['newline', 'indent']:
                 return (token, value)
 
             if token == 'open':
@@ -59,9 +60,9 @@ class Scanner:
                 return self.next()
 
         if self.state == self.state_xtend:
-            if token in ['other', 'nl', 'indent']:
+            if token in ['other', 'newline', 'indent']:
                 values = [value]
-                while self._peek()[0] in ['other', 'nl', 'indent']:
+                while self._peek()[0] in ['other', 'newline', 'indent']:
                     _, value = self._next()
                     values.append(value)
                 code_value = (''.join(values)).strip()
@@ -83,7 +84,7 @@ class Scanner:
 
     def end(self):
         if self.state == self.state_xtend:
-            raise Exception('Unclosed {')
+            raise XtendParseException(self, '{')
 
     def scan(self):
         results = []
@@ -96,13 +97,39 @@ class Scanner:
         return results
 
 
+class XtendParseException(Exception):
+    def __init__(self, scanner: Scanner, expected: Union[str, List[str]], got: str = None):
+        self.scanner = scanner
+        self.position = scanner.position
+        if got:
+            self.msg = f'Expected {expected}, got {got}, '
+        else:
+            self.msg = f'Expected {expected} '
+        self.msg += f'at [{self.position[0]}:{self.position[1]}]'
+        super().__init__(self.msg)
+
+    def readable_error_position(self, **kwargs):
+        result = ''
+        start, stop = self.position
+        lines = self.scanner.input.split('\n')
+        for line in lines:
+            result += line + '\n'
+            if start < len(line) + 1 and start >= 0:
+                for pos in range(0, stop):
+                    result += ' ' if pos < start else '^'
+                result += '\n'
+            start -= len(line) + 1
+            stop -= len(line) + 1
+        return result
+
+
 class Parser():
     def __init__(self, input):
         self.scanner = Scanner(input)
         self._lookahead = None
 
-    def fail(self, expected=Union[str, List[str]]):
-        raise Exception('cannot parse')
+    def fail(self, expected: Union[str, List[str]], got: str):
+        raise XtendParseException(self.scanner, expected, got)
 
     def _next(self) -> Tuple[str, str]:
         if self._lookahead:
@@ -119,19 +146,19 @@ class Parser():
     def parse_keyword(self, keyword: str):
         token, value = self._next()
         if token != 'keyword' and value != keyword:
-            self.fail(expected=keyword)
+            self.fail(expected=keyword, got=token)
 
     def parse_code(self):
         token, value = self._next()
         if token == 'code':
             return 'code', value
-        self.fail(expected='code')
+        self.fail(expected='code', got=token)
 
     def parse_string(self):
         string_value = []
         while True:
             token, value = self._peek()
-            if token in ['string', 'indent', 'nl']:
+            if token in ['string', 'indent', 'newline']:
                 self._next()
                 string_value.append(value)
 
@@ -153,15 +180,15 @@ class Parser():
             if value == 'FOR':
                 return self.parse_for()
 
-            self.fail(expected=['if', 'for'])
+            self.fail(expected=['IF', 'FOR'], got=token)
 
-        if token == 'string':
+        if token in ['string', 'indent', 'newline']:
             return self.parse_string()
 
         if token == 'code':
             return self.parse_expr()
 
-        self.fail(expected=['if', 'for', 'string', 'code'])
+        self.fail(expected=['IF', 'FOR', 'string', 'code'], got=token)
 
     def parse_expr(self):
         return 'expr', self.parse_code()
