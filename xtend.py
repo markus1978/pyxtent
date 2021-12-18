@@ -16,8 +16,11 @@ class Scanner:
         f'(?P<{name}>{expr})' for name, expr in tokens.items()
     ]))
 
+    state_string = 'string'
+    state_xtend = 'xtend'
+
     def __init__(self, input):
-        self.input = Scanner.token_pattern.finditer(input)
+        self.input = self.token_pattern.finditer(input)
         self._lookahead = None
         self.state = 'string'
         self.position = 0
@@ -40,7 +43,7 @@ class Scanner:
 
     def next(self) -> Tuple[str, str]:
         token, value = self._next()
-        if self.state == 'string':
+        if self.state == self.state_string:
             if token in ['other', 'keyword']:
                 values = [value]
                 while self._peek()[0] in ['other', 'keyword']:
@@ -52,16 +55,19 @@ class Scanner:
                 return (token, value)
 
             if token == 'open':
-                self.state = 'xtend'
+                self.state = self.state_xtend
                 return self.next()
 
-        if self.state == 'xtend':
+        if self.state == self.state_xtend:
             if token in ['other', 'nl', 'indent']:
                 values = [value]
                 while self._peek()[0] in ['other', 'nl', 'indent']:
                     _, value = self._next()
                     values.append(value)
-                return 'code', ''.join(values)
+                code_value = (''.join(values)).strip()
+                if code_value != '':
+                    return 'code', ''.join(values)
+                return self.next()
 
             if token == 'keyword':
                 return token, value
@@ -73,7 +79,11 @@ class Scanner:
         if token is None:
             return None, None
 
-        raise NotImplementedError()
+        raise NotImplementedError()  # pragma: no cover
+
+    def end(self):
+        if self.state == self.state_xtend:
+            raise Exception('Unclosed {')
 
     def scan(self):
         results = []
@@ -82,6 +92,7 @@ class Scanner:
             if token is None:
                 break
             results.append((token, value))
+        self.end()
         return results
 
 
@@ -113,8 +124,6 @@ class Parser():
     def parse_code(self):
         token, value = self._next()
         if token == 'code':
-            if value.strip() == '':
-                self.fail(expected='code')
             return 'code', value
         self.fail(expected='code')
 
@@ -127,16 +136,12 @@ class Parser():
                 string_value.append(value)
 
             else:
-                break
-
-        if len(string_value) == 0:
-            self.fail(expected='string')
-
-        return 'string', ''.join(string_value)
+                return 'string', ''.join(string_value)
 
     def parse_xtend(self):
         while self._peek()[0]:
             yield self.parse_stmt()
+        self.scanner.end()
 
     def parse_stmt(self):
         # stmt -> string | if | for | expr
@@ -181,7 +186,7 @@ class Parser():
                 elif value == 'END':
                     break
 
-                self.fail(expected=['ELIF', 'ELSE', 'END'])
+                raise NotImplementedError()  # pragma: no cover
 
         self.parse_keyword('END')
 

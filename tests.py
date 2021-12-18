@@ -1,3 +1,4 @@
+from _pytest.python_api import raises
 import pytest
 
 from xtend import Scanner, parse
@@ -14,9 +15,15 @@ from xtend import Scanner, parse
         'indent, keyword, code, keyword, code, nl',
         id='with-white-space'
     ),
-    pytest.param('1{{2}}3', 'string', id='escape')
+    pytest.param('1{{2}}3', 'string', id='escape'),
+    pytest.param('inbalanced { inbalanced', None, id='inbalanced')
 ])
 def test_scanner(input: str, output: str):
+    if output is None:
+        with pytest.raises(Exception):
+            Scanner(input).scan()
+        return
+
     result_output = [token for token, _ in Scanner(input).scan()]
     expected_output = [token.strip() for token in output.split(',')]
     assert result_output == expected_output
@@ -32,9 +39,14 @@ def test_scanner(input: str, output: str):
     pytest.param('{IF c}s{ELSE}s', None, id='if-no-end'),
     pytest.param('{IF c}{END}', None, id='if-no-stmt'),
     pytest.param('{IF }s{END}', None, id='if-no-code'),
+    pytest.param('{IF c}', None, id='if-no-follow'),
+    pytest.param('{END}', None, id='end-no-if'),
+    pytest.param('s{END}', None, id='end-no-if'),
+    pytest.param('s{ELIF}', None, id='elif-no-if'),
     pytest.param('{IF c}s{ELIF c}{END}', None, id='elif-no-stmt'),
     pytest.param('{IF c}s{ELSE}{END}', None, id='else-no-stmt'),
     pytest.param('{FOR item IN list}{item}{END}', 'for', id='for'),
+    pytest.param('something { inbalanced', None, id='inbalanced-tmpl')
 ])
 def test_parser(input: str, output: str):
     if output is None:
